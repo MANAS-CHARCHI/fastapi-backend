@@ -1,21 +1,42 @@
 from logging.config import fileConfig
 import os
 import sys
+import asyncio
+import pkgutil
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
-import asyncio
-# 1. Load your models and metadata
-import models  # Ensure this points to your file with "class Base(DeclarativeBase):"
-target_metadata = models.Base.metadata
 
-# 2. Setup environment variables
+# 1. ADD PROJECT ROOT TO SYS.PATH
+# This allows 'import apps' to work when running from inside the container
 BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+# 2. LOAD ENVIRONMENT VARIABLES
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
+# 3. IMPORT BASE AND DYNAMICALLY LOAD MODELS
+# Import the specific Base from your models file
+from apps.users.models import Base 
+import apps
+
+
+# This loop finds all models in all subdirectories of /apps
+for loader, module_name, is_pkg in pkgutil.walk_packages(apps.__path__, apps.__name__ + "."):
+    __import__(module_name)
+
+# Set the metadata for Alembic
+target_metadata = Base.metadata
+
+# 4. ALEMBIC CONFIGURATION
 config = context.config
+
+# Interpret the config file for Python logging.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+    
 db_url = os.getenv('DATABASE_URL')
 if db_url:
     config.set_main_option('sqlalchemy.url', db_url)
