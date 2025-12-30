@@ -14,7 +14,7 @@ class Users(Base):
     id:Mapped[int] = Column(Integer, primary_key=True, index=True)
     email:Mapped[str] = Column(String, unique=True, index=True, nullable=False)
     password:Mapped[str] = Column(String, nullable=False)
-    is_active:Mapped[bool] = Column(Boolean, default=True)
+    is_active:Mapped[bool] = Column(Boolean, default=False)
     created_at:Mapped[datetime] = Column(DateTime(timezone=True), server_default=func.now())
     updated_at:Mapped[datetime] = Column(DateTime(timezone=True), onupdate=func.now())
     activations : Mapped["Activations"] = relationship("Activations", back_populates="user", cascade="all, delete-orphan")

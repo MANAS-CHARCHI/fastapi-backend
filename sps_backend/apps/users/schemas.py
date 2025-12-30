@@ -15,3 +15,14 @@ class UserResponse(BaseModel):
     updated_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserLoginResponse(BaseModel):
+    email: EmailStr
+
+    model_config = ConfigDict(from_attributes=True)

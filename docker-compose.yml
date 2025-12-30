@@ -18,6 +18,14 @@ services:
     ports:
       - "5050:80"
 
+  redis:
+    container_name: redis
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    depends_on:
+      - db
+
   backend:
     container_name: backend
     build:
@@ -27,6 +35,28 @@ services:
       - ./sps_backend:/usr/src/app/
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8001:8000"
+    restart: always
+    depends_on:
+      - db
+      - redis
+
+  celery_worker:
+    container_name: celery_worker
+    build:
+      context: ./sps_backend
+    # Pointing to the celery_app instance inside main.py
+    command: celery -A main.celery_app worker --loglevel=info
+    volumes:
+      - ./sps_backend:/usr/src/app/
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/usr/src/app
+    depends_on:
+      - redis
+      - db
     restart: always
