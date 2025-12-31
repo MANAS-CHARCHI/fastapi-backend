@@ -47,7 +47,7 @@ def do_run_migrations(connection):
     This helper function runs migrations in a synchronous context 
     provided by the async connection's 'run_sync' method.
     """
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(connection=connection, target_metadata=target_metadata, compare_server_default=True)
 
     with context.begin_transaction():
         context.run_migrations()

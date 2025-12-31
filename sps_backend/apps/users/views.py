@@ -1,7 +1,8 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from .models import Users as User, Activations
+from sqlalchemy.orm import selectinload
+from .models import Users as User,TokenBlacklist
 from .schemas import UserCreate, UserLogin
 from fastapi import HTTPException, Response, Request
 from datetime import datetime, timedelta, timezone
@@ -70,6 +71,18 @@ async def login_user_view(user: UserLogin, db: AsyncSession, response: Response)
             subject=db_user.email, expires_delta=refresh_token_expires
         )
 
+        # insert jti into TokenBlacklist table
+        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        jti = payload.get("jti")
+        expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
+        token_blacklist_entry = TokenBlacklist(
+            jti=jti,
+            user_id=db_user.id,
+            expires_at=expires_at
+        )
+        db.add(token_blacklist_entry)
+        await db.commit()
+
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax")
         response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=False, samesite="lax")
 
@@ -79,7 +92,7 @@ async def login_user_view(user: UserLogin, db: AsyncSession, response: Response)
 
 async def activate_user_view(user_email: str, activation_code: str, db: AsyncSession):
     # Fetch the user by email
-    user_result = await db.execute(select(User).where(User.email == user_email))
+    user_result = await db.execute(select(User).where(User.email == user_email).options(selectinload(User.activations)))
     db_user = user_result.scalar_one_or_none()
     
     if not db_user:
@@ -87,23 +100,16 @@ async def activate_user_view(user_email: str, activation_code: str, db: AsyncSes
         
     if db_user.is_active:
         return {"message": "User is already active"}
-    
-    # Fetch the activation record
-    act_result = await db.execute(
-        select(Activations).where(
-            Activations.user_id == db_user.id,
-            Activations.activation_code == activation_code,
-            Activations.is_used == False
-        )
-    )
-    db_activation = act_result.scalar_one_or_none()
+
+    activation_result = db_user.activations.activation_code == activation_code and db_user.activations.is_used == False
+    db_activation = activation_result
 
     if not db_activation:
         raise HTTPException(status_code=400, detail="Invalid or already used activation code")
 
     # Perform update
     db_user.is_active = True
-    db_activation.is_used = True
+    db_user.activations.is_used = True
     await db.commit()
     return {"message": "User activated successfully"}
 
