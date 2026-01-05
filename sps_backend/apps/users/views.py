@@ -1,4 +1,5 @@
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -14,10 +15,14 @@ import uuid
 
 def create_access_token(
     subject: str,
+    user_id: str,
+    role: str,
     expires_delta: timedelta
 ):
     payload = {
         "sub": subject,
+        "id": user_id,
+        "role": role,
         "type": "access",
         "exp": datetime.now(timezone.utc) + expires_delta
     }
@@ -30,10 +35,14 @@ def create_access_token(
 
 def create_refresh_token(
     subject: str,
+    user_id: str,
+    role: str,
     expires_delta: timedelta
 ):
     payload = {
         "sub": subject,
+        "id": user_id,
+        "role": role,
         "type": "refresh",
         "jti": str(uuid.uuid4()),
         "exp": datetime.now(timezone.utc) + expires_delta
@@ -53,22 +62,27 @@ async def create_user_view(user: UserCreate, db: AsyncSession):
     await db.refresh(db_user)
     return db_user
 
-async def get_users_view(db: AsyncSession):
-    result = await db.execute(select(User))
-    return result.scalars().all()
+async def get_users_view(db: AsyncSession, request: Request):
 
-async def login_user_view(user: UserLogin, db: AsyncSession, response: Response):
+    user_email = request.state.user_email
+    result = await db.execute(select(User).where(User.email == user_email))
+    db_user = result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
+async def login_user_view(user: UserLogin, response: Response, db: AsyncSession):
     result = await db.execute(select(User).where(User.email == user.email))
     db_user = result.scalar_one_or_none()
     
     if db_user and verify_password(user.password, db_user.password):
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            subject=db_user.email, expires_delta=access_token_expires
+            subject=db_user.email, user_id=str(db_user.id), role=db_user.role, expires_delta=access_token_expires
         )
         refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         refresh_token = create_refresh_token(
-            subject=db_user.email, expires_delta=refresh_token_expires
+            subject=db_user.email, user_id=str(db_user.id), role=db_user.role, expires_delta=refresh_token_expires
         )
 
         # insert jti into TokenBlacklist table
@@ -85,7 +99,6 @@ async def login_user_view(user: UserLogin, db: AsyncSession, response: Response)
 
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax")
         response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=False, samesite="lax")
-
         return {"email": db_user.email}
     else:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -113,11 +126,7 @@ async def activate_user_view(user_email: str, activation_code: str, db: AsyncSes
     await db.commit()
     return {"message": "User activated successfully"}
 
-async def refresh_token_view(
-    db: AsyncSession,
-    request: Request,
-    response: Response
-):
+async def refresh_token_view(db: AsyncSession, request: Request, response: Response):
     # This function assumes the refresh token is sent via cookies
     refresh_token = request.cookies.get("refresh_token")
     
@@ -126,20 +135,45 @@ async def refresh_token_view(
     
     try:
         payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        old_jti = payload.get("jti")
         user_email = payload.get("sub")
-        
-        if user_email is None:
-            raise HTTPException(status_code=401, detail="Invalid refresh token")
-        
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        new_access_token = create_access_token(
-            subject=user_email, expires_delta=access_token_expires
-        )
-        
-        response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=False, samesite="lax")
-        return {"message": "Access token refreshed"}
-    
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Refresh token expired")
+        user_id = payload.get("id")
+        user_role = payload.get("role") 
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    # Check if jti is in TokenBlacklist
+    new_refresh_token = create_refresh_token(
+            subject=user_email, user_id=str(user_id), role=user_role, expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        )
+    new_payload = jwt.decode(new_refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    new_jti = new_payload.get("jti")
+    new_exp = datetime.fromtimestamp(new_payload.get("exp"), tz=timezone.utc)
+
+    # Attempt to update the row and if exist return ID
+    statement = (
+        update(TokenBlacklist)
+        .where(TokenBlacklist.jti == old_jti)
+        .values(jti=new_jti, expires_at=new_exp)
+        .returning(TokenBlacklist.id)
+    )
+    result = await db.execute(statement)
+    updated_id = result.scalar_one_or_none()
+
+    if updated_id is None:
+        raise HTTPException(status_code=401, detail="Refresh token is invalid or has been revoked")
+    try:
+        await db.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to update refresh token")
+    
+    new_access_token = create_access_token(
+        subject=user_email, user_id=user_id, role=user_role, expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    
+    response.set_cookie(key="access_token", value=new_access_token, httponly=True, secure=False, samesite="lax")
+    response.set_cookie(key="refresh_token", value=new_refresh_token, httponly=True, secure=False, samesite="lax")
+    return {"message": "Access token refreshed"}
+
