@@ -26,6 +26,7 @@ def login_required(func):
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
             request.state.user_email = payload.get("sub")
+            request.state.user_id = payload.get("id")
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token expired")
         except jwt.InvalidTokenError:
@@ -61,7 +62,8 @@ def role_required(required_role: str):
             try:
                 payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
                 user_role = payload.get("role")
-                if user_role != required_role:
+                if user_role not in required_role:
+                    print( "role by token is:", user_role, " required_role is:", required_role)
                     raise HTTPException(status_code=403, detail="Insufficient permissions")
                 request.state.user_email = payload.get("sub")
             except jwt.ExpiredSignatureError:

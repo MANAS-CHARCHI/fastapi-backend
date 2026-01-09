@@ -47,3 +47,6 @@ pyjwt[crypto]
 passlib[bcrypt]
 pydantic-settings
 bcrypt
+websockets
+aioboto3
+python-multipart

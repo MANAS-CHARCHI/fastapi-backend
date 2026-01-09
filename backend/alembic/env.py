@@ -26,6 +26,7 @@ import apps
 # This loop finds all models in all subdirectories of /apps
 for loader, module_name, is_pkg in pkgutil.walk_packages(apps.__path__, apps.__name__ + "."):
     __import__(module_name)
+    print(f"  -> Loaded: {module_name}")
 
 # Set the metadata for Alembic
 target_metadata = Base.metadata

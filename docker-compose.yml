@@ -29,14 +29,21 @@ services:
   backend:
     container_name: backend
     build:
-      context: ./sps_backend
+      context: ./backend
     command: bash -c "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
-      - ./sps_backend:/usr/src/app/
+      - ./backend:/usr/src/app/
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
       - REDIS_URL=redis://redis:6379/0
+      # AWS
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      # Admin
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
     ports:
       - "8001:8000"
     restart: always
@@ -47,15 +54,45 @@ services:
   celery_worker:
     container_name: celery_worker
     build:
-      context: ./sps_backend
+      context: ./backend
     # Pointing to the celery_app instance inside main.py
     command: celery -A main.celery_app worker --loglevel=info
     volumes:
-      - ./sps_backend:/usr/src/app/
+      - ./backend:/usr/src/app/
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - PYTHONPATH=/usr/src/app
+      # AWS
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      # Admin
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
+    depends_on:
+      - redis
+      - db
+    restart: always
+
+  celery_beat:
+    container_name: celery_beat
+    build:
+      context: ./backend
+    command: celery -A main.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/usr/src/app/
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/usr/src/app
+      # AWS
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      # Admin
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
     depends_on:
       - redis
       - db

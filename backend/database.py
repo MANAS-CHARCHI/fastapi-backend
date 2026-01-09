@@ -8,4 +8,9 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 async def get_db():
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            # Ensures the connection is returned to the pool 
+            # even if the request fails.
+            await session.close()

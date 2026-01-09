@@ -22,3 +22,8 @@ class UserLogin(BaseModel):
 class UserLoginResponse(BaseModel):
     email: EmailStr
     model_config = ConfigDict(from_attributes=True)
+
+class InvitationCreate(BaseModel):
+    email: EmailStr
+    role: str
+    model_config = ConfigDict(from_attributes=True)
